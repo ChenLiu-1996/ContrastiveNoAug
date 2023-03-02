@@ -1,0 +1,16 @@
+.vscode
+data
+**/__pycache__
+
+# Figures
+**/*.png
+
+# Models
+**/*.pt
+**/*.pkl
+**/*.pth
+**/*.pth.tar
+
+# Data
+**/*.npy
+**/*.npz
