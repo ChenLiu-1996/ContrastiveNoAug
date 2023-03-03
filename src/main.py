@@ -156,18 +156,12 @@ def train(config: AttributeHashmap) -> None:
                                   patience=config.patience,
                                   percentage=False)
 
-    val_acc_pct_list = [30, 40, 50, 60, 70, 80]
-    is_model_saved = {}
-    for val_acc_percentage in val_acc_pct_list:
-        is_model_saved['val_acc_%s%%' % val_acc_percentage] = False
     best_val_acc = 0
     best_model = None
 
-    for epoch_idx in range(config.max_epoch):
+    for epoch_idx in range(config.train_epoch):
         state_dict = {
             'train_loss': 0,
-            'train_acc': 0,
-            'val_loss': 0,
             'val_acc': 0,
         }
 
@@ -176,7 +170,7 @@ def train(config: AttributeHashmap) -> None:
         Training
         '''
         model.train()
-        correct, total_count_loss, total_count_acc = 0, 0, 0
+        correct, total_count_loss = 0, 0
         for batch_idx, (x, y_true) in enumerate(tqdm(train_loader)):
             B = x.shape[0]
             assert config.in_channels in [1, 3]
@@ -189,49 +183,46 @@ def train(config: AttributeHashmap) -> None:
             z = model.project(x)
 
             loss = loss_fn_contrastive(z, x)
-            state_dict['train_loss'] += loss.item() * B
-            total_count_loss += B
+            if loss.item() < 100:
+                # Temporary fix: occasional nan at early batches.
+                state_dict['train_loss'] += loss.item() * B
+                total_count_loss += B
 
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
 
             lr_scheduler.step(epoch_idx + batch_idx / len(train_loader))
+        state_dict['train_loss'] /= total_count_loss
 
         # Iter over training set again and train linear classifier.
         model.init_linear()
         # Note: Need to create another optimizer because the model will keep updating
         # even after freezing with `requires_grad = False` when `opt` has `momentum`.
-        opt_linear = torch.optim.SGD(list(model.linear.parameters()),
-                                     nesterov=True,
-                                     lr=float(config.learning_rate_linear),
-                                     momentum=0.9,
-                                     weight_decay=float(config.weight_decay))
-        for batch_idx, (x, y_true) in enumerate(tqdm(train_loader)):
-            B = x.shape[0]
-            assert config.in_channels in [1, 3]
-            if config.in_channels == 1:
-                # Repeat the channel dimension: 1 channel -> 3 channels.
-                x = x.repeat(1, 3, 1, 1)
-            x, y_true = x.to(device), y_true.to(device)
+        opt_linear = torch.optim.AdamW(list(model.linear.parameters()),
+                                       lr=float(config.learning_rate_linear),
+                                       weight_decay=float(config.weight_decay))
+        for _ in range(config.linear_epoch):
+            for batch_idx, (x, y_true) in enumerate(tqdm(train_loader)):
+                B = x.shape[0]
+                assert config.in_channels in [1, 3]
+                if config.in_channels == 1:
+                    # Repeat the channel dimension: 1 channel -> 3 channels.
+                    x = x.repeat(1, 3, 1, 1)
+                x, y_true = x.to(device), y_true.to(device)
 
-            y_pred = model(x)
-            loss = loss_fn_classification(y_pred, y_true)
-            correct += torch.sum(torch.argmax(y_pred, dim=-1) == y_true).item()
-            total_count_acc += 2 * B
+                y_pred = model(x)
+                loss = loss_fn_classification(y_pred, y_true)
 
-            opt_linear.zero_grad()
-            loss.backward()
-            opt_linear.step()
-
-        state_dict['train_loss'] /= total_count_loss
-        state_dict['train_acc'] = correct / total_count_acc * 100
+                opt_linear.zero_grad()
+                loss.backward()
+                opt_linear.step()
 
         #
         '''
         Validation
         '''
-        correct, total_count_loss, total_count_acc = 0, 0, 0
+        correct, total_count_acc = 0, 0
         model.eval()
         with torch.no_grad():
             for x, y_true in val_loader:
@@ -244,12 +235,10 @@ def train(config: AttributeHashmap) -> None:
 
                 y_pred = model(x)
                 loss = loss_fn_classification(y_pred, y_true)
-                state_dict['val_loss'] += loss.item() * B
                 correct += torch.sum(
                     torch.argmax(y_pred, dim=-1) == y_true).item()
                 total_count_acc += B
 
-        state_dict['val_loss'] = torch.nan
         state_dict['val_acc'] = correct / total_count_acc * 100
 
         log('Epoch: %d. %s' % (epoch_idx, print_state_dict(state_dict)),
@@ -265,20 +254,6 @@ def train(config: AttributeHashmap) -> None:
             log('Best model (so far) successfully saved.',
                 filepath=log_path,
                 to_console=False)
-
-            for val_acc_percentage in val_acc_pct_list:
-                if state_dict[
-                        'val_acc'] > val_acc_percentage and not is_model_saved[
-                            'val_acc_%s%%' % val_acc_percentage]:
-                    model_save_path = '%s/%s-%s' % (
-                        config.checkpoint_dir, config.dataset,
-                        'val_acc_%s%%.pth' % val_acc_percentage)
-                    torch.save(best_model, model_save_path)
-                    is_model_saved['val_acc_%s%%' % val_acc_percentage] = True
-                    log('%s%% accuracy model successfully saved.' %
-                        val_acc_percentage,
-                        filepath=log_path,
-                        to_console=False)
 
         if early_stopper.step(state_dict['val_acc']):
             log('Early stopping criterion met. Ending training.',

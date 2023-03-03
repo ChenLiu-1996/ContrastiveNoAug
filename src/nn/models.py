@@ -12,7 +12,7 @@ class ResNet50(torch.nn.Module):
     def __init__(self,
                  num_classes: int = 10,
                  hidden_dim: int = 512,
-                 z_dim: int = 256) -> None:
+                 z_dim: int = 128) -> None:
         super(ResNet50, self).__init__()
         self.num_classes = num_classes
 

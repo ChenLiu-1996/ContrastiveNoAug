@@ -1,7 +1,7 @@
 checkpoint_dir: '$ROOT_DIR/results/checkpoints/'
 log_dir: '$ROOT_DIR/results/logs/'
 output_save_path: '$ROOT_DIR/results/results/'
-dataset_dir: '$ROOT_DIR/data/mnist/'
+dataset_dir: '$ROOT_DIR/data/cifar10/'
 train_epoch: 20
 linear_epoch: 50
 patience: 5
@@ -10,5 +10,5 @@ learning_rate: 1e-3
 learning_rate_linear: 1e-4
 weight_decay: 1e-6
 num_workers: 16
-dataset: 'mnist'
+dataset: 'cifar10'
 random_seed: 1
